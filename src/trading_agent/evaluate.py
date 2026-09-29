@@ -39,11 +39,13 @@ async def evaluate_splits(
 
     for name, selected in groups:
         warmed = slice_with_warmup(bars, selected)
+        warmup_bars = len(warmed) - len(selected)
         summary = await run_paper(
             warmed,
             use_jev=use_jev,
             fee_bps=fee_bps,
             slippage_bps=slippage_bps,
+            warmup_bars=warmup_bars,
             log_path=str(output / f"{name}.jsonl"),
         )
         evaluations.append(
