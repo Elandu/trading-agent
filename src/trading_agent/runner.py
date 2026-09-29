@@ -31,65 +31,76 @@ async def run_paper(
 ) -> dict[str, float | int]:
     if len(bars) < 30:
         raise ValueError("need at least 30 bars")
+
     broker = PaperBroker(starting_cash=starting_cash, fee_bps=fee_bps)
     risk = RiskEngine()
     path = Path(log_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    async with _judge(use_jev) as judge, path.open("w", encoding="utf-8") as log:
-        for i in range(30, len(bars)):
-            bar = bars[i]
-            state = build_state(
-                bars[: i + 1],
-                position=broker.position,
-                unrealized_pnl=broker.unrealized(bar.close),
-                drawdown=broker.drawdown(bar.close),
-            )
-            judgment = await judge.judge(state)
-            baseline = baseline_direction(state)
-            equity = broker.equity(bar.close)
-            verdict = risk.check(
-                state,
-                equity=equity,
-                daily_pnl=broker.realized - broker.fees,
-                confidence=judgment.confidence,
-                setup_quality=judgment.setup_quality,
-            )
-            target_notional = 0.0
-            trade = None
-            if verdict.allowed:
-                target_notional = equity * target_fraction(judgment)
-                trade = broker.target(
-                    bar,
-                    target_notional=target_notional,
-                    reason=f"{judgment.source}:{judgment.direction}",
+    async with _judge(use_jev) as judge:
+        with path.open("w", encoding="utf-8") as log:
+            for i in range(30, len(bars)):
+                bar = bars[i]
+                state = build_state(
+                    bars[: i + 1],
+                    position=broker.position,
+                    unrealized_pnl=broker.unrealized(bar.close),
+                    drawdown=broker.drawdown(bar.close),
                 )
-            record = {
-                "ts": bar.ts,
-                "price": bar.close,
-                "state": state.to_state_dict(),
-                "judgment": {
-                    "regime": judgment.regime,
-                    "direction": judgment.direction,
-                    "setup_quality": judgment.setup_quality,
-                    "confidence": judgment.confidence,
-                    "source": judgment.source,
-                    "latency_ms": judgment.latency_ms,
-                },
-                "baseline_direction": baseline,
-                "risk": {"allowed": verdict.allowed, "reason": verdict.reason},
-                "target_notional": target_notional,
-                "trade": None
-                if trade is None
-                else {
-                    "side": trade.side,
-                    "price": trade.price,
-                    "quantity": trade.quantity,
-                    "fee": trade.fee,
-                },
-                "equity": broker.equity(bar.close),
-            }
-            log.write(json.dumps(record, separators=(",", ":")) + "\n")
+                judgment = await judge.judge(state)
+                baseline = baseline_direction(state)
+                equity = broker.equity(bar.close)
+                verdict = risk.check(
+                    state,
+                    equity=equity,
+                    daily_pnl=broker.realized - broker.fees,
+                    confidence=judgment.confidence,
+                    setup_quality=judgment.setup_quality,
+                )
+
+                if verdict.allowed:
+                    target_notional = equity * target_fraction(judgment)
+                    reason = f"{judgment.source}:{judgment.direction}"
+                else:
+                    # A veto can never create/increase exposure. Existing exposure
+                    # is flattened so risk/uncertainty does not leave stale positions.
+                    target_notional = 0.0
+                    reason = f"risk:{verdict.reason}"
+
+                trade = None
+                if verdict.allowed or broker.position != 0.0:
+                    trade = broker.target(
+                        bar,
+                        target_notional=target_notional,
+                        reason=reason,
+                    )
+
+                record = {
+                    "ts": bar.ts,
+                    "price": bar.close,
+                    "state": state.to_state_dict(),
+                    "judgment": {
+                        "regime": judgment.regime,
+                        "direction": judgment.direction,
+                        "setup_quality": judgment.setup_quality,
+                        "confidence": judgment.confidence,
+                        "source": judgment.source,
+                        "latency_ms": judgment.latency_ms,
+                    },
+                    "baseline_direction": baseline,
+                    "risk": {"allowed": verdict.allowed, "reason": verdict.reason},
+                    "target_notional": target_notional,
+                    "trade": None
+                    if trade is None
+                    else {
+                        "side": trade.side,
+                        "price": trade.price,
+                        "quantity": trade.quantity,
+                        "fee": trade.fee,
+                    },
+                    "equity": broker.equity(bar.close),
+                }
+                log.write(json.dumps(record, separators=(",", ":")) + "\n")
 
     last = bars[-1]
     return {
