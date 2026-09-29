@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import time
 import urllib.parse
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +14,7 @@ from pathlib import Path
 from .models import Bar
 
 BINANCE_SPOT_KLINES = "https://data-api.binance.vision/api/v3/klines"
+BINANCE_ARCHIVE_BASE = "https://data.binance.vision/data/spot/monthly/klines"
 INTERVAL_MS = {"5m": 5 * 60 * 1000}
 
 
@@ -27,6 +30,12 @@ def date_to_ms(value: str) -> int:
     return int(dt.timestamp() * 1000)
 
 
+def _normalise_ts(value: int) -> int:
+    # Binance public archives moved some spot timestamps from milliseconds to
+    # microseconds. Internally this project always stores Unix milliseconds.
+    return value // 1000 if value > 10_000_000_000_000 else value
+
+
 def fetch_binance_range(
     *,
     symbol: str = "BTCUSDT",
@@ -36,7 +45,7 @@ def fetch_binance_range(
     request_limit: int = 1000,
     pause_s: float = 0.05,
 ) -> list[Bar]:
-    """Download a fixed public Binance spot kline range, oldest to newest."""
+    """Download a fixed public Binance spot kline range from market-data REST."""
     if interval not in INTERVAL_MS:
         raise ValueError(f"unsupported interval: {interval}")
     if end_ms <= start_ms:
@@ -66,7 +75,7 @@ def fetch_binance_range(
             break
 
         for row in rows:
-            ts = int(row[0])
+            ts = _normalise_ts(int(row[0]))
             if ts >= end_ms:
                 break
             bars.append(
@@ -80,7 +89,7 @@ def fetch_binance_range(
                 )
             )
 
-        last_ts = int(rows[-1][0])
+        last_ts = _normalise_ts(int(rows[-1][0]))
         next_cursor = last_ts + step_ms
         if next_cursor <= cursor:
             raise RuntimeError("Binance pagination did not advance")
@@ -89,6 +98,66 @@ def fetch_binance_range(
             break
         if pause_s:
             time.sleep(pause_s)
+
+    unique = {bar.ts: bar for bar in bars}
+    return [unique[ts] for ts in sorted(unique)]
+
+
+def _iter_months(start_ms: int, end_ms: int):
+    start = datetime.fromtimestamp(start_ms / 1000, tz=UTC)
+    end = datetime.fromtimestamp((end_ms - 1) / 1000, tz=UTC)
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        yield year, month
+        month += 1
+        if month == 13:
+            year += 1
+            month = 1
+
+
+def fetch_binance_archive_range(
+    *,
+    symbol: str = "BTCUSDT",
+    interval: str = "5m",
+    start_ms: int,
+    end_ms: int,
+) -> list[Bar]:
+    """Download monthly spot kline ZIPs from Binance Data Vision."""
+    if interval not in INTERVAL_MS:
+        raise ValueError(f"unsupported interval: {interval}")
+    if end_ms <= start_ms:
+        raise ValueError("end_ms must be greater than start_ms")
+
+    symbol = symbol.upper()
+    bars: list[Bar] = []
+    for year, month in _iter_months(start_ms, end_ms):
+        filename = f"{symbol}-{interval}-{year:04d}-{month:02d}.zip"
+        url = f"{BINANCE_ARCHIVE_BASE}/{symbol}/{interval}/{filename}"
+        req = urllib.request.Request(url, headers={"User-Agent": "trading-agent/0.1"})
+        with urllib.request.urlopen(req, timeout=60) as response:
+            payload = response.read()
+
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            members = [name for name in archive.namelist() if name.endswith(".csv")]
+            if len(members) != 1:
+                raise RuntimeError(f"expected one CSV in {filename}, got {members}")
+            with archive.open(members[0]) as handle:
+                reader = csv.reader(io.TextIOWrapper(handle, encoding="utf-8"))
+                for row in reader:
+                    if not row or not row[0].isdigit():
+                        continue
+                    ts = _normalise_ts(int(row[0]))
+                    if start_ms <= ts < end_ms:
+                        bars.append(
+                            Bar(
+                                ts=ts,
+                                open=float(row[1]),
+                                high=float(row[2]),
+                                low=float(row[3]),
+                                close=float(row[4]),
+                                volume=float(row[5]),
+                            )
+                        )
 
     unique = {bar.ts: bar for bar in bars}
     return [unique[ts] for ts in sorted(unique)]
