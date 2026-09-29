@@ -12,6 +12,8 @@ from .models import Bar
 from .risk import RiskEngine
 from .strategy import baseline_direction, target_fraction
 
+DAY_MS = 86_400_000
+
 
 @asynccontextmanager
 async def _judge(use_jev: bool):
@@ -51,6 +53,7 @@ async def run_paper(
     slippage_bps: float = 2.0,
     min_hold_bars: int = 3,
     min_trade_notional: float = 25.0,
+    warmup_bars: int = 0,
     log_path: str = "data/experiments.jsonl",
 ) -> dict[str, object]:
     if len(bars) < 30:
@@ -76,10 +79,20 @@ async def run_paper(
     log_lines: list[str] = []
     agent_last_trade_i = -10_000
     baseline_last_trade_i = -10_000
+    start_i = max(30, warmup_bars)
+
+    current_day: int | None = None
+    agent_day_start_equity = starting_cash
+    baseline_day_start_equity = starting_cash
 
     async with _judge(use_jev) as judge:
-        for i in range(30, len(bars)):
+        for i in range(start_i, len(bars)):
             bar = bars[i]
+            day = bar.ts // DAY_MS
+            if day != current_day:
+                current_day = day
+                agent_day_start_equity = agent.equity(bar.close)
+                baseline_day_start_equity = baseline_broker.equity(bar.close)
 
             state = build_state(
                 bars[max(0, i - 120) : i + 1],
@@ -92,7 +105,7 @@ async def run_paper(
             verdict = risk.check(
                 state,
                 equity=agent_value,
-                daily_pnl=agent.realized - agent.fees,
+                daily_pnl=agent_value - agent_day_start_equity,
                 confidence=judgment.confidence,
                 setup_quality=judgment.setup_quality,
             )
@@ -133,7 +146,7 @@ async def run_paper(
             baseline_verdict = risk.check(
                 baseline_state,
                 equity=baseline_value,
-                daily_pnl=baseline_broker.realized - baseline_broker.fees,
+                daily_pnl=baseline_value - baseline_day_start_equity,
                 confidence=1.0,
                 setup_quality=100.0,
             )
@@ -213,7 +226,7 @@ async def run_paper(
     _write_log(path, log_lines)
 
     return {
-        "bars": len(bars),
+        "bars": len(bars) - start_i,
         "costs": {
             "fee_bps": fee_bps,
             "slippage_bps": slippage_bps,
