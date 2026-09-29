@@ -48,10 +48,10 @@ async def run_paper(
     path.parent.mkdir(parents=True, exist_ok=True)
     agent_equity = [starting_cash]
     baseline_equity = [starting_cash]
+    log_lines: list[str] = []
 
     async with _judge(use_jev) as judge:
-        with path.open("w", encoding="utf-8") as log:
-            for i in range(30, len(bars)):
+        for i in range(30, len(bars)):
                 bar = bars[i]
 
                 state = build_state(
@@ -161,7 +161,9 @@ async def run_paper(
                         "equity": baseline_value,
                     },
                 }
-                log.write(json.dumps(record, separators=(",", ":")) + "\n")
+            log_lines.append(json.dumps(record, separators=(",", ":")))
+
+    path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
 
     return {
         "bars": len(bars),
