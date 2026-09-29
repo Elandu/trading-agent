@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import math
-from itertools import pairwise
 from dataclasses import dataclass
+from itertools import pairwise
 
 
 @dataclass(frozen=True, slots=True)
