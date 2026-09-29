@@ -8,11 +8,14 @@ dependencies = [
   "typesafe-sdk>=0.7.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.8",
+]
+
 [project.scripts]
 trading-agent = "trading_agent.cli:main"
-
-[dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.8"]
 
 [build-system]
 requires = ["hatchling"]
