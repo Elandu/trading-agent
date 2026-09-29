@@ -226,7 +226,8 @@ async def run_paper(
     _write_log(path, log_lines)
 
     return {
-        "bars": len(bars) - start_i,
+        "bars": len(bars),
+        "evaluated_bars": len(bars) - start_i,
         "costs": {
             "fee_bps": fee_bps,
             "slippage_bps": slippage_bps,
