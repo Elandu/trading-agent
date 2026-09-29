@@ -21,4 +21,7 @@ def test_paper_loop_offline(tmp_path) -> None:
         run_paper(bars, log_path=str(tmp_path / "experiment.jsonl"))
     )
     assert summary["bars"] == 100
-    assert summary["ending_equity"] > 0
+    assert summary["agent"]["ending_equity"] > 0
+    assert summary["baseline"]["ending_equity"] > 0
+    assert "sharpe" in summary["agent"]
+    assert "sharpe" in summary["baseline"]
