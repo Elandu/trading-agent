@@ -30,6 +30,10 @@ def _baseline_fraction(direction: str) -> float:
     return 0.0
 
 
+def _write_log(path: Path, lines: list[str]) -> None:
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 async def run_paper(
     bars: list[Bar],
     *,
@@ -52,118 +56,118 @@ async def run_paper(
 
     async with _judge(use_jev) as judge:
         for i in range(30, len(bars)):
-                bar = bars[i]
+            bar = bars[i]
 
-                state = build_state(
-                    bars[: i + 1],
-                    position=agent.position,
-                    unrealized_pnl=agent.unrealized(bar.close),
-                    drawdown=agent.drawdown(bar.close),
+            state = build_state(
+                bars[: i + 1],
+                position=agent.position,
+                unrealized_pnl=agent.unrealized(bar.close),
+                drawdown=agent.drawdown(bar.close),
+            )
+            judgment = await judge.judge(state)
+            agent_value = agent.equity(bar.close)
+            verdict = risk.check(
+                state,
+                equity=agent_value,
+                daily_pnl=agent.realized - agent.fees,
+                confidence=judgment.confidence,
+                setup_quality=judgment.setup_quality,
+            )
+
+            if verdict.allowed:
+                agent_target = agent_value * target_fraction(judgment)
+                agent_reason = f"{judgment.source}:{judgment.direction}"
+            else:
+                agent_target = 0.0
+                agent_reason = f"risk:{verdict.reason}"
+
+            agent_trade = None
+            if verdict.allowed or agent.position != 0.0:
+                agent_trade = agent.target(
+                    bar,
+                    target_notional=agent_target,
+                    reason=agent_reason,
                 )
-                judgment = await judge.judge(state)
-                agent_value = agent.equity(bar.close)
-                verdict = risk.check(
-                    state,
-                    equity=agent_value,
-                    daily_pnl=agent.realized - agent.fees,
-                    confidence=judgment.confidence,
-                    setup_quality=judgment.setup_quality,
+
+            baseline_state = build_state(
+                bars[: i + 1],
+                position=baseline_broker.position,
+                unrealized_pnl=baseline_broker.unrealized(bar.close),
+                drawdown=baseline_broker.drawdown(bar.close),
+            )
+            baseline_signal = baseline_direction(baseline_state)
+            baseline_value = baseline_broker.equity(bar.close)
+            baseline_verdict = risk.check(
+                baseline_state,
+                equity=baseline_value,
+                daily_pnl=baseline_broker.realized - baseline_broker.fees,
+                confidence=1.0,
+                setup_quality=100.0,
+            )
+            baseline_target = (
+                baseline_value * _baseline_fraction(baseline_signal)
+                if baseline_verdict.allowed
+                else 0.0
+            )
+            baseline_trade = None
+            if baseline_verdict.allowed or baseline_broker.position != 0.0:
+                baseline_trade = baseline_broker.target(
+                    bar,
+                    target_notional=baseline_target,
+                    reason=f"baseline:{baseline_signal}",
                 )
 
-                if verdict.allowed:
-                    agent_target = agent_value * target_fraction(judgment)
-                    agent_reason = f"{judgment.source}:{judgment.direction}"
-                else:
-                    agent_target = 0.0
-                    agent_reason = f"risk:{verdict.reason}"
+            agent_value = agent.equity(bar.close)
+            baseline_value = baseline_broker.equity(bar.close)
+            agent_equity.append(agent_value)
+            baseline_equity.append(baseline_value)
 
-                agent_trade = None
-                if verdict.allowed or agent.position != 0.0:
-                    agent_trade = agent.target(
-                        bar,
-                        target_notional=agent_target,
-                        reason=agent_reason,
-                    )
-
-                baseline_state = build_state(
-                    bars[: i + 1],
-                    position=baseline_broker.position,
-                    unrealized_pnl=baseline_broker.unrealized(bar.close),
-                    drawdown=baseline_broker.drawdown(bar.close),
-                )
-                baseline_signal = baseline_direction(baseline_state)
-                baseline_value = baseline_broker.equity(bar.close)
-                baseline_verdict = risk.check(
-                    baseline_state,
-                    equity=baseline_value,
-                    daily_pnl=baseline_broker.realized - baseline_broker.fees,
-                    confidence=1.0,
-                    setup_quality=100.0,
-                )
-                baseline_target = (
-                    baseline_value * _baseline_fraction(baseline_signal)
-                    if baseline_verdict.allowed
-                    else 0.0
-                )
-                baseline_trade = None
-                if baseline_verdict.allowed or baseline_broker.position != 0.0:
-                    baseline_trade = baseline_broker.target(
-                        bar,
-                        target_notional=baseline_target,
-                        reason=f"baseline:{baseline_signal}",
-                    )
-
-                agent_value = agent.equity(bar.close)
-                baseline_value = baseline_broker.equity(bar.close)
-                agent_equity.append(agent_value)
-                baseline_equity.append(baseline_value)
-
-                record = {
-                    "ts": bar.ts,
-                    "price": bar.close,
-                    "state": state.to_state_dict(),
-                    "agent": {
-                        "judgment": {
-                            "regime": judgment.regime,
-                            "direction": judgment.direction,
-                            "setup_quality": judgment.setup_quality,
-                            "confidence": judgment.confidence,
-                            "source": judgment.source,
-                            "latency_ms": judgment.latency_ms,
-                        },
-                        "risk": {"allowed": verdict.allowed, "reason": verdict.reason},
-                        "target_notional": agent_target,
-                        "trade": None
-                        if agent_trade is None
-                        else {
-                            "side": agent_trade.side,
-                            "price": agent_trade.price,
-                            "quantity": agent_trade.quantity,
-                            "fee": agent_trade.fee,
-                        },
-                        "equity": agent_value,
+            record = {
+                "ts": bar.ts,
+                "price": bar.close,
+                "state": state.to_state_dict(),
+                "agent": {
+                    "judgment": {
+                        "regime": judgment.regime,
+                        "direction": judgment.direction,
+                        "setup_quality": judgment.setup_quality,
+                        "confidence": judgment.confidence,
+                        "source": judgment.source,
+                        "latency_ms": judgment.latency_ms,
                     },
-                    "baseline": {
-                        "direction": baseline_signal,
-                        "risk": {
-                            "allowed": baseline_verdict.allowed,
-                            "reason": baseline_verdict.reason,
-                        },
-                        "target_notional": baseline_target,
-                        "trade": None
-                        if baseline_trade is None
-                        else {
-                            "side": baseline_trade.side,
-                            "price": baseline_trade.price,
-                            "quantity": baseline_trade.quantity,
-                            "fee": baseline_trade.fee,
-                        },
-                        "equity": baseline_value,
+                    "risk": {"allowed": verdict.allowed, "reason": verdict.reason},
+                    "target_notional": agent_target,
+                    "trade": None
+                    if agent_trade is None
+                    else {
+                        "side": agent_trade.side,
+                        "price": agent_trade.price,
+                        "quantity": agent_trade.quantity,
+                        "fee": agent_trade.fee,
                     },
-                }
+                    "equity": agent_value,
+                },
+                "baseline": {
+                    "direction": baseline_signal,
+                    "risk": {
+                        "allowed": baseline_verdict.allowed,
+                        "reason": baseline_verdict.reason,
+                    },
+                    "target_notional": baseline_target,
+                    "trade": None
+                    if baseline_trade is None
+                    else {
+                        "side": baseline_trade.side,
+                        "price": baseline_trade.price,
+                        "quantity": baseline_trade.quantity,
+                        "fee": baseline_trade.fee,
+                    },
+                    "equity": baseline_value,
+                },
+            }
             log_lines.append(json.dumps(record, separators=(",", ":")))
 
-    path.write_text("\n".join(log_lines) + "\n", encoding="utf-8")
+    _write_log(path, log_lines)
 
     return {
         "bars": len(bars),
