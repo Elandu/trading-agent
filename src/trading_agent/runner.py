@@ -30,6 +30,14 @@ def _baseline_fraction(direction: str) -> float:
     return 0.0
 
 
+def _position_direction(position: float) -> str:
+    if position > 0:
+        return "long"
+    if position < 0:
+        return "short"
+    return "flat"
+
+
 def _write_log(path: Path, lines: list[str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -39,20 +47,35 @@ async def run_paper(
     *,
     use_jev: bool = False,
     starting_cash: float = 10_000.0,
-    fee_bps: float = 6.0,
+    fee_bps: float = 10.0,
+    slippage_bps: float = 2.0,
+    min_hold_bars: int = 3,
+    min_trade_notional: float = 25.0,
     log_path: str = "data/experiments.jsonl",
 ) -> dict[str, object]:
     if len(bars) < 30:
         raise ValueError("need at least 30 bars")
 
-    agent = PaperBroker(starting_cash=starting_cash, fee_bps=fee_bps)
-    baseline_broker = PaperBroker(starting_cash=starting_cash, fee_bps=fee_bps)
+    agent = PaperBroker(
+        starting_cash=starting_cash,
+        fee_bps=fee_bps,
+        slippage_bps=slippage_bps,
+        min_trade_notional=min_trade_notional,
+    )
+    baseline_broker = PaperBroker(
+        starting_cash=starting_cash,
+        fee_bps=fee_bps,
+        slippage_bps=slippage_bps,
+        min_trade_notional=min_trade_notional,
+    )
     risk = RiskEngine()
     path = Path(log_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     agent_equity = [starting_cash]
     baseline_equity = [starting_cash]
     log_lines: list[str] = []
+    agent_last_trade_i = -10_000
+    baseline_last_trade_i = -10_000
 
     async with _judge(use_jev) as judge:
         for i in range(30, len(bars)):
@@ -74,20 +97,30 @@ async def run_paper(
                 setup_quality=judgment.setup_quality,
             )
 
-            if verdict.allowed:
+            requested_direction = judgment.direction if verdict.allowed else "flat"
+            current_direction = _position_direction(agent.position)
+            hold_ok = (
+                current_direction == "flat"
+                or requested_direction == current_direction
+                or i - agent_last_trade_i >= min_hold_bars
+            )
+            if verdict.allowed and hold_ok:
                 agent_target = agent_value * target_fraction(judgment)
                 agent_reason = f"{judgment.source}:{judgment.direction}"
-            else:
+            elif not verdict.allowed:
                 agent_target = 0.0
                 agent_reason = f"risk:{verdict.reason}"
+            else:
+                agent_target = agent.position * bar.close
+                agent_reason = "churn_guard:min_hold"
 
-            agent_trade = None
-            if verdict.allowed or agent.position != 0.0:
-                agent_trade = agent.target(
-                    bar,
-                    target_notional=agent_target,
-                    reason=agent_reason,
-                )
+            agent_trade = agent.target(
+                bar,
+                target_notional=agent_target,
+                reason=agent_reason,
+            )
+            if agent_trade is not None:
+                agent_last_trade_i = i
 
             baseline_state = build_state(
                 bars[: i + 1],
@@ -104,18 +137,30 @@ async def run_paper(
                 confidence=1.0,
                 setup_quality=100.0,
             )
-            baseline_target = (
-                baseline_value * _baseline_fraction(baseline_signal)
-                if baseline_verdict.allowed
-                else 0.0
+            baseline_requested = baseline_signal if baseline_verdict.allowed else "flat"
+            baseline_current = _position_direction(baseline_broker.position)
+            baseline_hold_ok = (
+                baseline_current == "flat"
+                or baseline_requested == baseline_current
+                or i - baseline_last_trade_i >= min_hold_bars
             )
-            baseline_trade = None
-            if baseline_verdict.allowed or baseline_broker.position != 0.0:
-                baseline_trade = baseline_broker.target(
-                    bar,
-                    target_notional=baseline_target,
-                    reason=f"baseline:{baseline_signal}",
-                )
+            if baseline_verdict.allowed and baseline_hold_ok:
+                baseline_target = baseline_value * _baseline_fraction(baseline_signal)
+                baseline_reason = f"baseline:{baseline_signal}"
+            elif not baseline_verdict.allowed:
+                baseline_target = 0.0
+                baseline_reason = f"risk:{baseline_verdict.reason}"
+            else:
+                baseline_target = baseline_broker.position * bar.close
+                baseline_reason = "churn_guard:min_hold"
+
+            baseline_trade = baseline_broker.target(
+                bar,
+                target_notional=baseline_target,
+                reason=baseline_reason,
+            )
+            if baseline_trade is not None:
+                baseline_last_trade_i = i
 
             agent_value = agent.equity(bar.close)
             baseline_value = baseline_broker.equity(bar.close)
@@ -136,7 +181,6 @@ async def run_paper(
                         "latency_ms": judgment.latency_ms,
                     },
                     "risk": {"allowed": verdict.allowed, "reason": verdict.reason},
-                    "target_notional": agent_target,
                     "trade": None
                     if agent_trade is None
                     else {
@@ -153,7 +197,6 @@ async def run_paper(
                         "allowed": baseline_verdict.allowed,
                         "reason": baseline_verdict.reason,
                     },
-                    "target_notional": baseline_target,
                     "trade": None
                     if baseline_trade is None
                     else {
@@ -171,6 +214,12 @@ async def run_paper(
 
     return {
         "bars": len(bars),
+        "costs": {
+            "fee_bps": fee_bps,
+            "slippage_bps": slippage_bps,
+            "min_trade_notional": min_trade_notional,
+            "min_hold_bars": min_hold_bars,
+        },
         "agent": {
             **as_dict(summarize(agent_equity, starting_cash=starting_cash)),
             "trades": len(agent.trades),
