@@ -1,4 +1,5 @@
 name: historical-baseline
+# Uses Binance market-data-only endpoint to avoid trading-API geo restrictions.
 
 on:
   push:
