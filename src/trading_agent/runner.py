@@ -82,7 +82,7 @@ async def run_paper(
             bar = bars[i]
 
             state = build_state(
-                bars[: i + 1],
+                bars[max(0, i - 120) : i + 1],
                 position=agent.position,
                 unrealized_pnl=agent.unrealized(bar.close),
                 drawdown=agent.drawdown(bar.close),
@@ -123,7 +123,7 @@ async def run_paper(
                 agent_last_trade_i = i
 
             baseline_state = build_state(
-                bars[: i + 1],
+                bars[max(0, i - 120) : i + 1],
                 position=baseline_broker.position,
                 unrealized_pnl=baseline_broker.unrealized(bar.close),
                 drawdown=baseline_broker.drawdown(bar.close),
