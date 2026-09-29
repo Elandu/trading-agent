@@ -1,0 +1,37 @@
+name: historical-baseline
+
+on:
+  push:
+    paths:
+      - ".github/workflows/historical-baseline.yml"
+  workflow_dispatch:
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Download fixed BTC dataset
+        run: |
+          trading-agent download \
+            --symbol BTCUSDT \
+            --interval 5m \
+            --start 2025-09-01 \
+            --end 2026-09-01 \
+            --out data/BTCUSDT-5m-2025-09_2026-09.csv
+      - name: Evaluate deterministic references
+        run: |
+          trading-agent evaluate \
+            --csv data/BTCUSDT-5m-2025-09_2026-09.csv \
+            --out data/evaluations
+      - uses: actions/upload-artifact@v4
+        with:
+          name: btcusdt-5m-baseline
+          path: |
+            data/BTCUSDT-5m-2025-09_2026-09.csv
+            data/evaluations/
