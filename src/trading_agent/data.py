@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .models import Bar
 
-BINANCE_SPOT_KLINES = "https://api.binance.com/api/v3/klines"
+BINANCE_SPOT_KLINES = "https://data-api.binance.vision/api/v3/klines"
 INTERVAL_MS = {"5m": 5 * 60 * 1000}
 
 
