@@ -1,5 +1,5 @@
 name: historical-baseline
-# Uses Binance market-data-only endpoint to avoid trading-API geo restrictions.
+# Uses Binance Data Vision monthly archives; REST remains available as a fallback.
 
 on:
   push:
@@ -22,6 +22,7 @@ jobs:
           trading-agent download \
             --symbol BTCUSDT \
             --interval 5m \
+            --source archive \
             --start 2025-09-01 \
             --end 2026-09-01 \
             --out data/BTCUSDT-5m-2025-09_2026-09.csv
