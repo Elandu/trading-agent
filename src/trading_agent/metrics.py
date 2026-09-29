@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from itertools import pairwise
 from dataclasses import dataclass
 
 
@@ -21,7 +22,7 @@ def summarize(equity_curve: list[float], *, starting_cash: float) -> Performance
         raise ValueError("equity curve cannot be empty")
 
     returns: list[float] = []
-    for prev, current in zip(equity_curve, equity_curve[1:]):
+    for prev, current in pairwise(equity_curve):
         if prev > 0:
             returns.append(current / prev - 1.0)
 
