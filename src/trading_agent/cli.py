@@ -24,7 +24,7 @@ async def _paper(args: argparse.Namespace) -> None:
     if args.source == "binance":
         try:
             bars = fetch_binance_bars(args.symbol, "5m", args.bars)
-        except Exception as exc:
+        except (OSError, TimeoutError, ValueError) as exc:
             print(f"Binance fetch failed ({exc}); using deterministic synthetic bars.")
             bars = synthetic_bars(args.bars)
     else:
