@@ -5,7 +5,13 @@ import asyncio
 import json
 from pathlib import Path
 
-from .data import (\n    date_to_ms,\n    fetch_binance_archive_range,\n    fetch_binance_range,\n    load_csv,\n    save_csv,\n)
+from .data import (
+    date_to_ms,
+    fetch_binance_archive_range,
+    fetch_binance_range,
+    load_csv,
+    save_csv,
+)
 from .evaluate import evaluate_splits
 from .market import fetch_binance_bars, synthetic_bars
 from .runner import run_paper
@@ -30,7 +36,8 @@ def _parser() -> argparse.ArgumentParser:
     download.add_argument("--interval", default="5m")
     download.add_argument("--start", required=True, help="YYYY-MM-DD")
     download.add_argument("--end", required=True, help="YYYY-MM-DD, exclusive")
-    download.add_argument("--out", default="data/BTCUSDT-5m.csv")\n    download.add_argument("--source", choices=("archive", "rest"), default="archive")
+    download.add_argument("--out", default="data/BTCUSDT-5m.csv")
+    download.add_argument("--source", choices=("archive", "rest"), default="archive")
 
     evaluate = sub.add_parser("evaluate")
     evaluate.add_argument("--csv", default="data/BTCUSDT-5m.csv")
