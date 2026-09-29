@@ -1,5 +1,5 @@
 name: historical-baseline
-# Uses Binance Data Vision monthly archives; REST remains available as a fallback.
+# Uses Binance Data Vision monthly archives; REST remains available as a fallback. v2
 
 on:
   push:
