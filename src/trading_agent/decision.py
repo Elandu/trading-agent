@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Self
 
 from typesafe_sdk import AsyncTypeSafeClient, Choice, Score
 
@@ -62,7 +63,7 @@ class JevJudge:
             ),
         }
 
-    async def __aenter__(self) -> "JevJudge":
+    async def __aenter__(self) -> Self:
         self._client = AsyncTypeSafeClient(model=self.model)
         await self._client.__aenter__()
         return self
